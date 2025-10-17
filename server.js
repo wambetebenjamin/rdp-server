@@ -1,42 +1,28 @@
-// Simple WebSocket signaling server
-const WebSocket = require('ws');
-const { v4: uuidv4 } = require('uuid');
+const express = require("express");
+const http = require("http");
+const WebSocket = require("ws");
+const cors = require("cors");
 
-const PORT = process.env.PORT || 8080;
-const wss = new WebSocket.Server({ port: PORT });
+const app = express();
+app.use(cors());
+app.get("/", (req, res) => res.send("Signaling server is running."));
 
-const clients = new Map(); // id -> ws
+const server = http.createServer(app);
+const wss = new WebSocket.Server({ server });
 
-console.log(`Signaling server listening on ws://0.0.0.0:${PORT}`);
-
-wss.on('connection', (ws) => {
-  const id = uuidv4();
-  clients.set(id, ws);
-  ws.id = id;
-
-  ws.send(JSON.stringify({ type: 'welcome', id }));
-
-  ws.on('message', (msg) => {
-    let data;
-    try { data = JSON.parse(msg); } catch (e) { return; }
-
-    if (data.type === 'signal' && data.to && data.data) {
-      const target = clients.get(data.to);
-      if (target && target.readyState === WebSocket.OPEN) {
-        target.send(JSON.stringify({
-          type: 'signal',
-          from: ws.id,
-          data: data.data
-        }));
-      } else {
-        ws.send(JSON.stringify({ type: 'error', message: 'target-unavailable' }));
+wss.on("connection", (ws) => {
+  console.log("Client connected");
+  ws.on("message", (message) => {
+    // broadcast to all others
+    wss.clients.forEach((client) => {
+      if (client !== ws && client.readyState === WebSocket.OPEN) {
+        client.send(message.toString());
       }
-    } else if (data.type === 'list') {
-      ws.send(JSON.stringify({ type: 'list', ids: Array.from(clients.keys()).filter(x => x !== ws.id) }));
-    }
+    });
   });
-
-  ws.on('close', () => {
-    clients.delete(id);
-  });
+  ws.on("close", () => console.log("Client disconnected"));
 });
+
+const PORT = process.env.PORT || 3000;
+server.listen(PORT, () => console.log(`Server running on port ${PORT}`));
+
